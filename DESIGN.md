@@ -94,8 +94,9 @@ limit.
 
 A caller is any comparable value that equals itself: an API key ID, a user
 ID, or a struct of several. A NaN float does not equal itself, so no map
-can find its entry again; both types refuse it with `ErrInvalidCaller`
-before changing anything.
+can find its entry again: `Slots.Acquire` and `Rates.Allow` refuse it with
+`ErrInvalidCaller` before changing anything, and `Rates.Limiter` gives it a
+new bucket each time.
 
 ## Testing
 
