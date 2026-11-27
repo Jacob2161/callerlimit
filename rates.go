@@ -9,16 +9,21 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Defaults for a Rates whose arguments leave them zero.
 const (
+	// DefaultMaximumBuckets is the most buckets a Rates holds when
+	// NewRatesArgs.MaximumBuckets is zero or negative.
 	DefaultMaximumBuckets = 100_000
-	DefaultIdleExpiry     = time.Hour
+	// DefaultIdleExpiry is how long an unused bucket is held when
+	// NewRatesArgs.IdleExpiry is zero or negative.
+	DefaultIdleExpiry = time.Hour
 )
 
-// Limit is a token bucket's configuration: Rate tokens a second, holding at
-// most Burst. A Rate of rate.Inf allows everything.
+// Limit is a token bucket's configuration.
 type Limit struct {
-	Rate  rate.Limit
+	// Rate is the tokens added a second. rate.Inf allows everything.
+	Rate rate.Limit
+	// Burst is the most tokens the bucket holds, and so the most requests
+	// allowed at once after an idle spell.
 	Burst int
 }
 
@@ -39,8 +44,9 @@ type NewRatesArgs struct {
 
 // Rates holds a token bucket for each caller and limit, created full on first
 // use and dropped when idle. A caller whose limit changes gets a fresh bucket
-// under the new limit, while requests admitted under the old one keep using
-// theirs. It is safe for concurrent use.
+// under the new limit, while requests allowed under the old one keep using
+// theirs. It is safe for concurrent use. Its cache runs a goroutine that
+// drops idle buckets; Close stops it.
 type Rates[K comparable] struct {
 	name    string
 	buckets *otter.Cache[limitedCaller[K], *rate.Limiter]
@@ -81,14 +87,24 @@ func NewRates[K comparable](args *NewRatesArgs) (*Rates[K], error) {
 // time; Allow refuses one.
 func (r *Rates[K]) Limiter(caller K, limit Limit) *rate.Limiter {
 	key := limitedCaller[K]{caller: caller, limit: limit}
-	if bucket, found := r.buckets.GetIfPresent(key); found {
+	bucket, found := r.buckets.GetIfPresent(key)
+	if found {
 		return bucket
 	}
 	fresh := rate.NewLimiter(limit.Rate, limit.Burst)
-	if bucket, inserted := r.buckets.SetIfAbsent(key, fresh); !inserted {
+	bucket, inserted := r.buckets.SetIfAbsent(key, fresh)
+	if !inserted {
 		return bucket
 	}
 	return fresh
+}
+
+// Close stops the goroutine that drops idle buckets and returns once it has
+// stopped. Closing twice does nothing. The buckets stay usable, but idle ones
+// are then dropped only as the cache fills, so close a Rates when its server
+// stops.
+func (r *Rates[K]) Close() {
+	r.buckets.StopAllGoroutines()
 }
 
 // Allow takes one token from caller's bucket, or returns an *OverloadError

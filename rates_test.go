@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -17,6 +18,7 @@ func TestRatesAllow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(rates.Close)
 	slow := Limit{Rate: 1, Burst: 2}
 	for range 2 {
 		if err := rates.Allow("alice", slow); err != nil {
@@ -25,9 +27,10 @@ func TestRatesAllow(t *testing.T) {
 	}
 	err = rates.Allow("alice", slow)
 	overload, ok := errors.AsType[*OverloadError](err)
-	if !ok || !errors.Is(err, ErrOverloaded) || overload.Pool != "requests" || overload.Reason != ReasonRate ||
-		overload.RetryAfter <= 0 || overload.RetryAfter > time.Second {
-		t.Fatalf("past the burst: %v", err)
+	if !ok || !errors.Is(err, ErrOverloaded) || overload.Pool != "requests" ||
+		overload.Reason != ReasonRate || overload.RetryAfter <= 0 ||
+		overload.RetryAfter > time.Second {
+		t.Fatalf("past the burst: %v, want a requests rate refusal within a second", err)
 	}
 	if err := rates.Allow("bob", slow); err != nil {
 		t.Fatalf("another caller: %v", err)
@@ -67,18 +70,20 @@ func TestWaitN(t *testing.T) {
 // TestOnOccupancy checks that the hook sees every change.
 func TestOnOccupancy(t *testing.T) {
 	var seen []Occupancy
-	pool := NewSlots[string](&NewSlotsArgs{Name: "uploads", Slots: 2, OnOccupancy: func(occupancy Occupancy) {
-		seen = append(seen, occupancy)
-	}})
+	pool := NewSlots[string](
+		&NewSlotsArgs{Name: "uploads", Slots: 2, OnOccupancy: func(occupancy Occupancy) {
+			seen = append(seen, occupancy)
+		}},
+	)
 	release, err := pool.Acquire(t.Context(), "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
 	release()
 	release()
-	if len(seen) != 3 || seen[0].Reserved != 0 || seen[1].Reserved != 1 || seen[1].ReservingCallers != 1 ||
-		seen[2].Reserved != 0 || seen[2].Slots != 2 {
-		t.Fatalf("occupancy seen %+v", seen)
+	if len(seen) != 3 || seen[0].Reserved != 0 || seen[1].Reserved != 1 ||
+		seen[1].ReservingCallers != 1 || seen[2].Reserved != 0 || seen[2].Slots != 2 {
+		t.Fatalf("occupancy seen %+v, want empty, one slot reserved, empty again", seen)
 	}
 }
 
@@ -103,6 +108,7 @@ func BenchmarkRatesAllow(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	b.Cleanup(rates.Close)
 	limit := Limit{Rate: rate.Inf}
 	b.RunParallel(func(parallel *testing.PB) {
 		caller := 0
@@ -111,4 +117,72 @@ func BenchmarkRatesAllow(b *testing.B) {
 			_ = rates.Allow(caller%1024, limit)
 		}
 	})
+}
+
+// TestRatesClose checks that Close stops the goroutine that drops idle
+// buckets and waits for it: synctest.Test fails if any goroutine the bubble
+// started is still running when the test returns. A second Close does
+// nothing.
+func TestRatesClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rates, err := NewRates[string](nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rates.Allow("alice", Limit{Rate: 1, Burst: 1}); err != nil {
+			t.Fatalf("Allow = %v, want nil", err)
+		}
+		rates.Close()
+		rates.Close()
+	})
+}
+
+// TestRatesIdleExpiry checks that a bucket used within IdleExpiry is the
+// same bucket, and one idle longer is dropped and made again, full.
+func TestRatesIdleExpiry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rates, err := NewRates[string](&NewRatesArgs{IdleExpiry: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rates.Close()
+		limit := Limit{Rate: rate.Every(time.Hour), Burst: 1}
+		first := rates.Limiter("alice", limit)
+		if !first.Allow() {
+			t.Fatal("a new bucket refused its first token, want it full")
+		}
+		time.Sleep(30 * time.Second)
+		if again := rates.Limiter("alice", limit); again != first {
+			t.Fatal("a bucket used within IdleExpiry was made again, want the same bucket")
+		}
+		time.Sleep(2 * time.Minute)
+		rates.buckets.CleanUp()
+		fresh := rates.Limiter("alice", limit)
+		if fresh == first {
+			t.Fatal("a bucket idle past IdleExpiry was kept, want it dropped")
+		}
+		if !fresh.Allow() {
+			t.Fatal("a remade bucket refused its first token, want it full")
+		}
+	})
+}
+
+// TestRatesMaximumBuckets checks that the cache holds no more than
+// MaximumBuckets buckets once its pending work is done, however many callers
+// there were.
+func TestRatesMaximumBuckets(t *testing.T) {
+	const maximumBuckets = 100
+	rates, err := NewRates[int](&NewRatesArgs{MaximumBuckets: maximumBuckets})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rates.Close)
+	limit := Limit{Rate: 1, Burst: 1}
+	for caller := range 10 * maximumBuckets {
+		rates.Limiter(caller, limit)
+	}
+	rates.buckets.CleanUp()
+	if held := rates.buckets.EstimatedSize(); held > maximumBuckets {
+		t.Fatalf("%d buckets held after 1,000 callers, want at most %d", held, maximumBuckets)
+	}
 }
