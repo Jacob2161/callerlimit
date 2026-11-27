@@ -28,6 +28,7 @@ if err != nil {
 defer release()
 
 requests, err := callerlimit.NewRates[string](&callerlimit.NewRatesArgs{Name: "requests"})
+defer requests.Close()
 if err := requests.Allow(apiKeyID, callerlimit.Limit{Rate: 50, Burst: 50}); err != nil {
 	// *callerlimit.OverloadError with the delay until the next token
 }
@@ -53,8 +54,12 @@ About 200 ns per acquire and release under parallel load.
 ## Rates
 
 A `golang.org/x/time/rate` bucket per caller and limit, in a bounded cache
-(otter's W-TinyLFU) that drops idle buckets; a dropped bucket comes back full. A caller whose limit changes gets a fresh bucket,
-while requests admitted under the old one keep theirs. `WaitN` waits for more
-tokens than the burst in burst-sized steps, for byte rates.
+(otter's W-TinyLFU) that drops idle buckets; a dropped bucket comes back
+full. A caller whose limit changes gets a fresh bucket, while requests
+allowed under the old one keep theirs. `WaitN` waits for more tokens than the
+burst in burst-sized steps, for byte rates. The cache runs a goroutine that
+drops idle buckets; `Close` stops it when the server stops.
+
+[DESIGN.md](DESIGN.md) explains how slots are handed out and why.
 
 Tested on the two newest Go releases. Licensed under the MIT license.
