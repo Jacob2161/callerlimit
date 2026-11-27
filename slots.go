@@ -74,6 +74,7 @@ type OverloadError struct {
 	RetryAfter time.Duration
 }
 
+// Error names the pool, the reason, and when to retry.
 func (e *OverloadError) Error() string {
 	return fmt.Sprintf("%s overloaded (%s); retry after %s", e.Pool, e.Reason, e.RetryAfter)
 }
@@ -83,13 +84,15 @@ func (e *OverloadError) Unwrap() error { return ErrOverloaded }
 
 // Occupancy is a pool's use at one moment.
 type Occupancy struct {
-	// Slots is the pool's size, and Reserved how many are in use.
-	Slots    int
+	// Slots is the pool's size.
+	Slots int
+	// Reserved is how many slots are in use.
 	Reserved int
-	// Queued counts the requests waiting, QueuedCallers the callers they
-	// belong to, and ReservingCallers the callers holding slots.
-	Queued           int
-	QueuedCallers    int
+	// Queued counts the requests waiting for a slot.
+	Queued int
+	// QueuedCallers counts the callers with requests waiting.
+	QueuedCallers int
+	// ReservingCallers counts the callers holding slots.
 	ReservingCallers int
 }
 
@@ -211,8 +214,9 @@ func (p *Slots[K]) publishOccupancyLocked() {
 	}
 }
 
-// SlotsByCaller copies the number of slots each caller holds.
-func (p *Slots[K]) SlotsByCaller() map[K]int {
+// CallerSlots returns a copy of the number of slots each caller holds, for
+// callers that hold any.
+func (p *Slots[K]) CallerSlots() map[K]int {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	slots := make(map[K]int, len(p.callers))
@@ -249,7 +253,11 @@ func (p *Slots[K]) Acquire(ctx context.Context, caller K) (func(), error) {
 	if (queue != nil && len(queue.requests) >= p.maximumCallerQueued) ||
 		p.queuedCount >= p.maximumQueued {
 		p.mutex.Unlock()
-		return nil, &OverloadError{Pool: p.name, Reason: ReasonQueueFull, RetryAfter: QueueFullRetry}
+		return nil, &OverloadError{
+			Pool:       p.name,
+			Reason:     ReasonQueueFull,
+			RetryAfter: QueueFullRetry,
+		}
 	}
 	if queue == nil {
 		queue = &callerQueue[K]{caller: caller}
@@ -295,7 +303,11 @@ func (p *Slots[K]) Acquire(ctx context.Context, caller K) (func(), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return nil, &OverloadError{Pool: p.name, Reason: ReasonWaitExpired, RetryAfter: WaitExpiredRetry}
+	return nil, &OverloadError{
+		Pool:       p.name,
+		Reason:     ReasonWaitExpired,
+		RetryAfter: WaitExpiredRetry,
+	}
 }
 
 // slotRelease returns the once-only function that gives a caller's slot back.
