@@ -1,6 +1,8 @@
 module github.com/jacob2161/callerlimit
 
-go 1.26.0
+go 1.27
+
+toolchain go1.27.4
 
 require (
 	github.com/maypok86/otter/v2 v2.3.0
