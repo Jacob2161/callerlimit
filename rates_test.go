@@ -182,7 +182,7 @@ func TestRatesMaximumBuckets(t *testing.T) {
 		rates.Limiter(caller, limit)
 	}
 	rates.buckets.CleanUp()
-	if held := rates.buckets.EstimatedSize(); held > maximumBuckets {
-		t.Fatalf("%d buckets held after 1,000 callers, want at most %d", held, maximumBuckets)
+	if stored := rates.buckets.EstimatedSize(); stored > maximumBuckets {
+		t.Fatalf("%d buckets stored after 1,000 callers, want at most %d", stored, maximumBuckets)
 	}
 }

@@ -188,7 +188,7 @@ func TestSlotRotationQueueLimits(t *testing.T) {
 				MaximumCallerQueued: 1,
 			},
 		)
-		release, err := pool.Acquire(t.Context(), "holder")
+		release, err := pool.Acquire(t.Context(), "first-caller")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -434,11 +434,11 @@ func TestCallerSlots(t *testing.T) {
 		}
 		releases = append(releases, release)
 	}
-	held := pool.CallerSlots()
-	if len(held) != 2 || held["alice"] != 2 || held["bob"] != 1 {
-		t.Fatalf("CallerSlots() = %v, want alice 2 and bob 1", held)
+	reserved := pool.CallerSlots()
+	if len(reserved) != 2 || reserved["alice"] != 2 || reserved["bob"] != 1 {
+		t.Fatalf("CallerSlots() = %v, want alice 2 and bob 1", reserved)
 	}
-	held["alice"] = 99
+	reserved["alice"] = 99
 	releases[2]()
 	if again := pool.CallerSlots(); len(again) != 1 || again["alice"] != 2 {
 		t.Fatalf("after bob's release CallerSlots() = %v, want alice 2 only", again)

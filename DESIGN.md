@@ -87,8 +87,9 @@ limit.
   is for byte rates, where waiting is right: it waits in burst-sized steps,
   so a request larger than the burst slows down instead of failing.
 - **Close.** The cache runs one goroutine that drops idle buckets. `Close`
-  stops it and waits for it, so a server that stops, or a test, leaves no
-  goroutine behind.
+  signals it to stop; the cache library offers no way to wait for it, so it
+  may still be finishing when `Close` returns. Expired buckets are never
+  returned either way.
 
 ## Callers
 

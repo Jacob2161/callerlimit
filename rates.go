@@ -99,9 +99,10 @@ func (r *Rates[K]) Limiter(caller K, limit Limit) *rate.Limiter {
 	return fresh
 }
 
-// Close stops the goroutine that drops idle buckets and returns once it has
-// stopped. Closing twice does nothing. The buckets stay usable, but idle ones
-// are then dropped only as the cache fills, so close a Rates when its server
+// Close signals the goroutine that drops idle buckets to stop; it may still
+// be finishing when Close returns. Closing twice does nothing. The buckets
+// stay usable afterward: an expired bucket is still never returned, but
+// nothing removes it until the cache fills, so close a Rates when its server
 // stops.
 func (r *Rates[K]) Close() {
 	r.buckets.StopAllGoroutines()

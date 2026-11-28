@@ -9,9 +9,9 @@ This is a breaking change and ships as v0.2.0.
 
 - `Slots.SlotsByCaller` is now `Slots.CallerSlots`, with the same result.
   Rename the call.
-- `Rates.Close` stops the goroutine that drops idle buckets and waits for
-  it. Call it when the server stops; until now that goroutine ran for the
-  life of the process.
+- `Rates.Close` tells the goroutine that drops idle buckets to stop. Call
+  it when the server stops; until now that goroutine ran for the life of
+  the process.
 - Every exported constant, field, and method has its own doc comment, and
   DESIGN.md explains how slots and buckets work.
 - CI also checks formatting, `go mod tidy -diff`, and `govulncheck`.
