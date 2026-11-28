@@ -62,4 +62,4 @@ drops idle buckets; `Close` stops it when the server stops.
 
 [DESIGN.md](DESIGN.md) explains how slots are handed out and why.
 
-Tested on the two newest Go releases. Licensed under the MIT license.
+Requires Go 1.27. Licensed under the MIT license.
